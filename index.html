@@ -236,7 +236,7 @@ function joueursMatch(m) {
     const mb = gpm * k, ma = apm * k;
     const md = (mb + ma) * 0.93;
     out.push({ j, pB: auMoins(mb, 1), pA: auMoins(ma, 1), pD: auMoins(md, 1),
-      pB2: auMoins(mb, 2), pA2: auMoins(ma, 2), pD2: auMoins(md, 2), pB3: auMoins(mb, 3), pA3: auMoins(ma, 3), pD3: auMoins(md, 3), incertain: !!bl, m,
+      pB2: auMoins(mb, 2), pA2: auMoins(ma, 2), pD2: auMoins(md, 2), pB3: auMoins(mb, 3), pA3: auMoins(ma, 3), pD3: auMoins(md, 3), mb, incertain: !!bl, m,
       adv: j.eq === m.dom.id ? m.ext.ab : m.dom.ab });
   });
   return out;
@@ -245,6 +245,19 @@ function joueursMatch(m) {
 /* Poisson : chance de faire au moins n fois (but, passe, point) */
 function auMoins(mu, n) { let t = 0, f = 1; for (let i = 0; i < n; i++) { if (i) f *= mu / i; t += f; } return Math.max(0, 1 - Math.exp(-mu) * t); }
 const TAG = { pB2: '2+ buts', pA2: '2+ passes', pD2: '2+ points', pB3: '3+ buts', pA3: '3+ passes', pD3: '3+ points' };
+/* Duos de buteurs d'un même match : les deux marquent, +1,5 et +2,5 buts à eux deux */
+function duos(js) {
+  const l = js.filter(x => !x.incertain).sort((a, b) => b.mb - a.mb).slice(0, 8), out = [];
+  for (let i = 0; i < l.length; i++) for (let k = i + 1; k < l.length; k++) {
+    const a = l[i], b = l[k], mu = a.mb + b.mb;
+    out.push({ a, b, m: a.m, deux: a.pB * b.pB, p15: auMoins(mu, 2), p25: auMoins(mu, 3) });
+  }
+  return out.sort((x, y) => y.p15 - x.p15);
+}
+const nomDuo = d => `${esc(d.a.j.court)} + ${esc(d.b.j.court)}`;
+const ligneDuo = d => `<div class="pl m" data-m="${esc(d.m.id)}"><div class="n">${nomDuo(d)}</div><div class="pc">${pc(d.p15)}</div>
+  <div class="d">+1,5 but à eux deux · ${esc(d.a.j.eqAb)}${d.a.j.eq === d.b.j.eq ? '' : '/' + esc(d.b.j.eqAb)} · ${heure(d.m.date)}</div><div class="co">joue si cote ≥ ${cote(d.p15)}</div>
+  <div class="d" style="grid-column:1/-1;white-space:normal">Les deux marquent ${pc(d.deux)} (cote ≥ ${cote(d.deux)}) · +2,5 buts ${pc(d.p25)} (cote ≥ ${cote(d.p25)})</div></div>`;
 /* ---------- Affichage ---------- */
 const ligne = (x, k) => {
   const p = x[k];
@@ -265,6 +278,7 @@ function vueTop(ev) {
     <div class="sec">🎯 Buteurs</div>${top('pB', 3).map(x => ligne(x, 'pB')).join('')}
     <div class="sec">🅰️ Passeurs</div>${top('pA', 3).map(x => ligne(x, 'pA')).join('')}
     <div class="sec">🔥 Plusieurs fois dans le match (points = buts + passes)</div>${top('pD2', 3).map(x => ligne(x, 'pD2')).join('')}${top('pB2', 2).map(x => ligne(x, 'pB2')).join('')}${top('pA2', 2).map(x => ligne(x, 'pA2')).join('')}
+    <div class="sec">👥 Duos de buteurs (2 joueurs du même match)</div>${avenir.flatMap(m => duos(joueursMatch(m))).sort((a, b) => b.p15 - a.p15).slice(0, 3).map(ligneDuo).join('')}
     <p class="note">💡 Joue un pari seulement si la cote du bookmaker est au moins égale à la « cote ≥ » affichée, avec 1 à 2 % de ta bankroll. Vérifie avant le match que le joueur est bien aligné.</p></div>`;
   return h;
 }
@@ -288,6 +302,7 @@ function vueJoueurs(ev) {
   let h = chipsJour();
   const avenir = ev.filter(m => m.etat === 'pre');
   if (!avenir.length) return h + '<p class="empty">Aucun match à venir ce jour-là.</p>';
+  if (S.seg === 'duo') S.seg = 'd';
   const k0 = { b: 'pB', a: 'pA', d: 'pD' }[S.seg], k = k0 + (S.nb > 1 ? S.nb : '');
   const tous = avenir.flatMap(joueursMatch).sort((a, b) => b[k] - a[k]).slice(0, 40);
   const mot = { b: ['but', 'buts'], a: ['passe décisive', 'passes décisives'], d: ['point (but ou passe)', 'points (buts ou passes)'] }[S.seg];
@@ -303,7 +318,12 @@ function ficheMatch(m) {
     return `<table><thead><tr><th class="eq">Joueur</th><th>Éq.</th><th>B</th><th>P</th><th>1+ %</th><th>2+ %</th><th>3+ %</th></tr></thead><tbody>${l.map(x =>
       `<tr><td class="eq">${esc(x.j.court)}${x.incertain ? '<span class="inc">?</span>' : ''}</td><td>${esc(x.j.eqAb)}</td><td>${x.j.b}</td><td>${x.j.a}</td><td class="g">${Math.round(x[k] * 100)}</td><td class="g">${Math.round(x[k + '2'] * 100)}</td><td>${Math.round(x[k + '3'] * 100)}</td></tr>`).join('')}</tbody></table>`;
   };
-  const corps = () => `<div class="seg">${[['d', 'Décisifs'], ['b', 'Buteurs'], ['a', 'Passeurs']].map(([v, t]) => `<button data-fseg="${v}" class="${S.seg === v ? 'on' : ''}">${t}</button>`).join('')}</div>
+  const fseg = () => `<div class="seg" style="grid-template-columns:repeat(4,1fr)">${[['d', 'Décisifs'], ['b', 'Buteurs'], ['a', 'Passeurs'], ['duo', 'Duos']].map(([v, t]) => `<button data-fseg="${v}" class="${S.seg === v ? 'on' : ''}">${t}</button>`).join('')}</div>`;
+  const corpsDuo = () => fseg() + `<div class="sub">Deux joueurs du match : chance que les deux marquent, ou qu'ils marquent 2 buts ou plus (+1,5) / 3 buts ou plus (+2,5) à eux deux</div>
+    <table><thead><tr><th class="eq">Duo</th><th>Les 2 marquent</th><th>+1,5</th><th>+2,5</th></tr></thead><tbody>${duos(js).slice(0, 12).map(d =>
+      `<tr><td class="eq" style="max-width:170px">${nomDuo(d)}</td><td class="g">${Math.round(d.deux * 100)}</td><td class="g">${Math.round(d.p15 * 100)}</td><td>${Math.round(d.p25 * 100)}</td></tr>`).join('')}</tbody></table>
+    <p class="note">En %. Cote minimum à viser : 100 ÷ % × 1,05. Vérifie que les deux joueurs sont alignés avant de parier.</p>`;
+  const corps = () => S.seg === 'duo' ? corpsDuo() : fseg() + `
     <div class="sub">% de chances qu'il le fasse 1, 2 ou 3 fois ou plus · B et P = buts et passes cette saison</div>${tab({ b: 'pB', a: 'pA', d: 'pD' }[S.seg])}
     <p class="note">Cote minimum à viser : 100 ÷ % × 1,05 (ex. 25 % → joue si cote ≥ 4,20). « ? » = joueur incertain (blessure légère). Le modèle ne connaît pas la composition du soir : vérifie que le joueur est aligné avant de parier.</p>`;
   ouvrir(`<h3>${esc(m.ext.nom)} @ ${esc(m.dom.nom)}</h3><div class="sub">${dateCourte(m.date)} · ${heure(m.date)}</div><div id="fc">${corps()}</div>`);
