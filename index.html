@@ -131,7 +131,7 @@ const M = {
   MARGE: 1.05         // cote minimum = juste prix + 5 %
 };
 
-let S = { jour: 0, tab: 'top', seg: 'd', data: {}, joueurs: null, eq: null, bless: null, t: 0 };
+let S = { jour: 0, tab: 'top', seg: 'd', nb: 1, data: {}, joueurs: null, eq: null, bless: null, t: 0 };
 
 const jourUS = dec => {      // date des matchs NHL (heure de New York), décalée de dec jours
   const d = new Date(Date.now() + dec * 864e5);
@@ -234,16 +234,21 @@ function joueursMatch(m) {
     const apm = (j.a + pr.a * M.K_J) / (j.mj + M.K_J);
     const k = lam[j.eq] / bpm[j.eq];                 // match plus ou moins prolifique que d'habitude
     const mb = gpm * k, ma = apm * k;
-    out.push({ j, pB: 1 - Math.exp(-mb), pA: 1 - Math.exp(-ma), pD: 1 - Math.exp(-(mb + ma) * 0.93), incertain: !!bl, m,
+    const md = (mb + ma) * 0.93;
+    out.push({ j, pB: auMoins(mb, 1), pA: auMoins(ma, 1), pD: auMoins(md, 1),
+      pB2: auMoins(mb, 2), pA2: auMoins(ma, 2), pD2: auMoins(md, 2), pB3: auMoins(mb, 3), pA3: auMoins(ma, 3), pD3: auMoins(md, 3), incertain: !!bl, m,
       adv: j.eq === m.dom.id ? m.ext.ab : m.dom.ab });
   });
   return out;
 }
 
+/* Poisson : chance de faire au moins n fois (but, passe, point) */
+function auMoins(mu, n) { let t = 0, f = 1; for (let i = 0; i < n; i++) { if (i) f *= mu / i; t += f; } return Math.max(0, 1 - Math.exp(-mu) * t); }
+const TAG = { pB2: '2+ buts', pA2: '2+ passes', pD2: '2+ points', pB3: '3+ buts', pA3: '3+ passes', pD3: '3+ points' };
 /* ---------- Affichage ---------- */
 const ligne = (x, k) => {
   const p = x[k];
-  return `<div class="pl m" data-m="${esc(x.m.id)}"><div class="n">${esc(x.j.nom)}${x.incertain ? '<span class="inc">incertain</span>' : ''}</div><div class="pc">${pc(p)}</div>
+  return `<div class="pl m" data-m="${esc(x.m.id)}"><div class="n">${esc(x.j.nom)}${TAG[k] ? ` · <span style="color:var(--gold2)">${TAG[k]}</span>` : ''}${x.incertain ? '<span class="inc">incertain</span>' : ''}</div><div class="pc">${pc(p)}</div>
     <div class="d">${esc(x.j.eqAb)} vs ${esc(x.adv)} · ${heure(x.m.date)}</div><div class="co">joue si cote ≥ ${cote(p)}</div></div>`;
 };
 const chipsJour = () => `<div class="chips">${['Cette nuit', 'Nuit suivante'].map((t, i) => `<button class="chip${S.jour === i ? ' on' : ''}" data-jour="${i}">${t}</button>`).join('')}</div>`;
@@ -259,6 +264,7 @@ function vueTop(ev) {
     <div class="sec">⭐ Joueurs décisifs (but ou passe)</div>${top('pD', 3).map(x => ligne(x, 'pD')).join('')}
     <div class="sec">🎯 Buteurs</div>${top('pB', 3).map(x => ligne(x, 'pB')).join('')}
     <div class="sec">🅰️ Passeurs</div>${top('pA', 3).map(x => ligne(x, 'pA')).join('')}
+    <div class="sec">🔥 Plusieurs fois dans le match (points = buts + passes)</div>${top('pD2', 3).map(x => ligne(x, 'pD2')).join('')}${top('pB2', 2).map(x => ligne(x, 'pB2')).join('')}${top('pA2', 2).map(x => ligne(x, 'pA2')).join('')}
     <p class="note">💡 Joue un pari seulement si la cote du bookmaker est au moins égale à la « cote ≥ » affichée, avec 1 à 2 % de ta bankroll. Vérifie avant le match que le joueur est bien aligné.</p></div>`;
   return h;
 }
@@ -282,22 +288,24 @@ function vueJoueurs(ev) {
   let h = chipsJour();
   const avenir = ev.filter(m => m.etat === 'pre');
   if (!avenir.length) return h + '<p class="empty">Aucun match à venir ce jour-là.</p>';
-  const k = { b: 'pB', a: 'pA', d: 'pD' }[S.seg];
+  const k0 = { b: 'pB', a: 'pA', d: 'pD' }[S.seg], k = k0 + (S.nb > 1 ? S.nb : '');
   const tous = avenir.flatMap(joueursMatch).sort((a, b) => b[k] - a[k]).slice(0, 40);
+  const mot = { b: ['but', 'buts'], a: ['passe décisive', 'passes décisives'], d: ['point (but ou passe)', 'points (buts ou passes)'] }[S.seg];
   h += `<div class="seg">${[['d', 'Décisifs'], ['b', 'Buteurs'], ['a', 'Passeurs']].map(([v, t]) => `<button data-seg="${v}" class="${S.seg === v ? 'on' : ''}">${t}</button>`).join('')}</div>`;
-  h += `<div class="card"><div class="st" style="color:var(--muted);font-size:12.5px">Chance qu'il ${LBL[k][1]} · tous les matchs à venir</div>${tous.map(x => ligne(x, k)).join('')}</div>`;
+  h += `<div class="chips">${[1, 2, 3].map(n => `<button class="chip${S.nb === n ? ' on' : ''}" data-nb="${n}">${n === 1 ? '1 fois ou +' : n + ' fois ou +'}</button>`).join('')}</div>`;
+  h += `<div class="card"><div class="st" style="color:var(--muted);font-size:12.5px">Chance qu'il fasse au moins ${S.nb} ${S.nb > 1 ? mot[1] : mot[0]} · tous les matchs à venir</div>${tous.map(x => ligne(x, k)).join('')}</div>`;
   return h;
 }
 function ficheMatch(m) {
   const js = joueursMatch(m);
   const tab = (k) => {
     const l = js.slice().sort((a, b) => b[k] - a[k]).slice(0, 12);
-    return `<table><thead><tr><th class="eq">Joueur</th><th>Éq.</th><th>B</th><th>P</th><th>%</th><th>Cote ≥</th></tr></thead><tbody>${l.map(x =>
-      `<tr><td class="eq">${esc(x.j.court)}${x.incertain ? '<span class="inc">?</span>' : ''}</td><td>${esc(x.j.eqAb)}</td><td>${x.j.b}</td><td>${x.j.a}</td><td class="g">${pc(x[k])}</td><td>${cote(x[k])}</td></tr>`).join('')}</tbody></table>`;
+    return `<table><thead><tr><th class="eq">Joueur</th><th>Éq.</th><th>B</th><th>P</th><th>1+ %</th><th>2+ %</th><th>3+ %</th></tr></thead><tbody>${l.map(x =>
+      `<tr><td class="eq">${esc(x.j.court)}${x.incertain ? '<span class="inc">?</span>' : ''}</td><td>${esc(x.j.eqAb)}</td><td>${x.j.b}</td><td>${x.j.a}</td><td class="g">${Math.round(x[k] * 100)}</td><td class="g">${Math.round(x[k + '2'] * 100)}</td><td>${Math.round(x[k + '3'] * 100)}</td></tr>`).join('')}</tbody></table>`;
   };
   const corps = () => `<div class="seg">${[['d', 'Décisifs'], ['b', 'Buteurs'], ['a', 'Passeurs']].map(([v, t]) => `<button data-fseg="${v}" class="${S.seg === v ? 'on' : ''}">${t}</button>`).join('')}</div>
-    <div class="sub">Chance qu'il ${LBL[{ b: 'pB', a: 'pA', d: 'pD' }[S.seg]][1]} · B et P = buts et passes cette saison</div>${tab({ b: 'pB', a: 'pA', d: 'pD' }[S.seg])}
-    <p class="note">« ? » = joueur incertain (blessure légère). Le modèle ne connaît pas la composition du soir : vérifie que le joueur est aligné avant de parier.</p>`;
+    <div class="sub">% de chances qu'il le fasse 1, 2 ou 3 fois ou plus · B et P = buts et passes cette saison</div>${tab({ b: 'pB', a: 'pA', d: 'pD' }[S.seg])}
+    <p class="note">Cote minimum à viser : 100 ÷ % × 1,05 (ex. 25 % → joue si cote ≥ 4,20). « ? » = joueur incertain (blessure légère). Le modèle ne connaît pas la composition du soir : vérifie que le joueur est aligné avant de parier.</p>`;
   ouvrir(`<h3>${esc(m.ext.nom)} @ ${esc(m.dom.nom)}</h3><div class="sub">${dateCourte(m.date)} · ${heure(m.date)}</div><div id="fc">${corps()}</div>`);
   $('#sheet').onclick = e => { const b = e.target.closest('[data-fseg]'); if (b) { S.seg = b.dataset.fseg; $('#fc').innerHTML = corps(); } };
 }
@@ -314,6 +322,7 @@ async function rendre() {
 $('#view').addEventListener('click', e => {
   const c = e.target.closest('[data-jour]'); if (c) { S.jour = +c.dataset.jour; return rendre(); }
   const s = e.target.closest('[data-seg]'); if (s) { S.seg = s.dataset.seg; return rendre(); }
+  const nb = e.target.closest('[data-nb]'); if (nb) { S.nb = +nb.dataset.nb; return rendre(); }
   const m = e.target.closest('[data-m]');
   if (m) { const d = S.data[jourUS(S.jour)]; const mm = d && d.ev.find(x => x.id === m.dataset.m); if (mm) ficheMatch(mm); }
 });
